@@ -9,12 +9,11 @@ import {
   MapPin,
   CalendarDays,
   User,
-  X,
-  ClipboardList
+  X
 } from "lucide-react";
 import "./App.css";
 
-const API = "http://localhost:5001/api";
+const API = "https://campusconnect-backend-vg6t.onrender.com/api";
 
 const emptyForm = {
   title: "",
@@ -32,7 +31,6 @@ export default function App() {
     JSON.parse(localStorage.getItem("cc_user") || "null")
   );
   const [items, setItems] = useState([]);
-  const [claims, setClaims] = useState([]);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState("home");
@@ -85,25 +83,6 @@ export default function App() {
           : Array.isArray(data.items)
             ? data.items
             : []
-      );
-    } catch (error) {
-      setNotice(error.message);
-    }
-  }
-
-  async function loadClaims() {
-    try {
-      const data = await request("/claims/mine");
-      const myClaims = Array.isArray(data)
-        ? data
-        : data.claims || [];
-
-      setClaims(myClaims);
-      setPage("claims");
-      setNotice(
-        myClaims.length
-          ? ""
-          : "You have not submitted any claims yet."
       );
     } catch (error) {
       setNotice(error.message);
@@ -191,6 +170,25 @@ export default function App() {
     }
   }
 
+  async function showMyClaims() {
+    try {
+      const data = await request("/claims/mine");
+      const claims = Array.isArray(data)
+        ? data
+        : data.claims || [];
+
+      setNotice(
+        claims.length
+          ? claims.map(c =>
+              `${c.item?.title || "Item"}: ${c.status || "Pending"}`
+            ).join(" • ")
+          : "You have not submitted any claims yet."
+      );
+    } catch (error) {
+      setNotice(error.message);
+    }
+  }
+
   function logout() {
     localStorage.removeItem("cc_token");
     localStorage.removeItem("cc_user");
@@ -198,7 +196,6 @@ export default function App() {
     setToken("");
     setUser(null);
     setItems([]);
-    setClaims([]);
     setPage("home");
     setNotice("You have logged out.");
   }
@@ -261,7 +258,7 @@ export default function App() {
           {token && (
             <button
               className="nav-link"
-              onClick={loadClaims}
+              onClick={showMyClaims}
             >
               My Claims
             </button>
@@ -319,7 +316,6 @@ export default function App() {
               <button
                 className="secondary-btn"
                 onClick={() => {
-                  setPage("home");
                   document.getElementById("listings")
                     ?.scrollIntoView({ behavior: "smooth" });
                 }}
@@ -551,207 +547,138 @@ export default function App() {
           </section>
         )}
 
-        {page === "claims" && (
-          <section className="listings">
-            <div className="section-heading">
-              <div>
-                <span className="eyebrow">YOUR ACTIVITY</span>
-                <h2>My Claims</h2>
-                <p>Track the status of your submitted claims.</p>
-              </div>
-
-              <button
-                className="secondary-btn"
-                onClick={loadClaims}
-              >
-                Refresh claims
-              </button>
+        <section className="listings" id="listings">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">COMMUNITY BOARD</span>
+              <h2>Recent reports</h2>
+              <p>
+                Browse items shared by your campus community.
+              </p>
             </div>
 
-            {claims.length === 0 ? (
-              <div className="empty-state">
-                <ClipboardList size={42} />
-                <h3>No claims submitted yet</h3>
-                <p>Your submitted claims will appear here.</p>
-                <button
-                  className="primary-btn"
-                  onClick={() => setPage("home")}
-                >
-                  Browse Items
-                </button>
+            <div className="list-tools">
+              <div className="search-box">
+                <Search size={17} />
+                <input
+                  placeholder="Search items..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
               </div>
-            ) : (
-              <div className="item-grid">
-                {claims.map(c => (
-                  <article className="item-card" key={c._id}>
-                    <div className="item-content">
-                      <div className="item-category">
-                        CLAIM DETAILS
-                      </div>
 
-                      <h3>{c.item?.title || "Item unavailable"}</h3>
-
-                      <p>
-                        {c.proofDescription || "No proof description"}
-                      </p>
-
-                      <div className="item-meta">
-                        <span>
-                          <CalendarDays size={14} />
-                          {c.createdAt
-                            ? new Date(c.createdAt).toLocaleDateString()
-                            : "Date unavailable"}
-                        </span>
-                      </div>
-
-                      <div className="item-footer">
-                        <small>Claim status</small>
-                        <strong>
-                          {(c.status || "pending").toUpperCase()}
-                        </strong>
-                      </div>
-                    </div>
-                  </article>
+              <div className="filters">
+                {["all", "lost", "found"].map(x => (
+                  <button
+                    key={x}
+                    className={filter === x ? "active" : ""}
+                    onClick={() => setFilter(x)}
+                  >
+                    {x[0].toUpperCase() + x.slice(1)}
+                  </button>
                 ))}
               </div>
-            )}
-          </section>
-        )}
-
-        {page === "home" && (
-          <section className="listings" id="listings">
-            <div className="section-heading">
-              <div>
-                <span className="eyebrow">COMMUNITY BOARD</span>
-                <h2>Recent reports</h2>
-                <p>
-                  Browse items shared by your campus community.
-                </p>
-              </div>
-
-              <div className="list-tools">
-                <div className="search-box">
-                  <Search size={17} />
-                  <input
-                    placeholder="Search items..."
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                  />
-                </div>
-
-                <div className="filters">
-                  {["all", "lost", "found"].map(x => (
-                    <button
-                      key={x}
-                      className={filter === x ? "active" : ""}
-                      onClick={() => setFilter(x)}
-                    >
-                      {x[0].toUpperCase() + x.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
+          </div>
 
-            {!token ? (
-              <div className="empty-state">
-                <PackageSearch size={42} />
-                <h3>Sign in to view campus reports</h3>
-                <p>
-                  Create an account or log in to browse and report items.
-                </p>
+          {!token ? (
+            <div className="empty-state">
+              <PackageSearch size={42} />
+              <h3>Sign in to view campus reports</h3>
+              <p>
+                Create an account or log in to browse and report items.
+              </p>
 
-                <button
-                  className="primary-btn"
-                  onClick={() => {
-                    setAuthMode("login");
-                    setPage("auth");
-                  }}
-                >
-                  Login / Register
-                </button>
-              </div>
-            ) : visibleItems.length === 0 ? (
-              <div className="empty-state">
-                <PackageSearch size={42} />
-                <h3>No reports found</h3>
-                <p>Be the first to add a lost or found item.</p>
+              <button
+                className="primary-btn"
+                onClick={() => {
+                  setAuthMode("login");
+                  setPage("auth");
+                }}
+              >
+                Login / Register
+              </button>
+            </div>
+          ) : visibleItems.length === 0 ? (
+            <div className="empty-state">
+              <PackageSearch size={42} />
+              <h3>No reports found</h3>
+              <p>Be the first to add a lost or found item.</p>
 
-                <button
-                  className="primary-btn"
-                  onClick={() => setPage("report")}
-                >
-                  Report an item
-                </button>
-              </div>
-            ) : (
-              <div className="item-grid">
-                {visibleItems.map(item => (
-                  <article className="item-card" key={item._id}>
-                    <div className="item-visual">
-                      {item.imageUrl ? (
-                        <img src={item.imageUrl} alt={item.title} />
-                      ) : (
-                        <PackageSearch size={44} />
-                      )}
+              <button
+                className="primary-btn"
+                onClick={() => setPage("report")}
+              >
+                Report an item
+              </button>
+            </div>
+          ) : (
+            <div className="item-grid">
+              {visibleItems.map(item => (
+                <article className="item-card" key={item._id}>
+                  <div className="item-visual">
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.title} />
+                    ) : (
+                      <PackageSearch size={44} />
+                    )}
 
-                      <span className={item.type?.toLowerCase()}>
-                        {item.type}
+                    <span className={item.type?.toLowerCase()}>
+                      {item.type}
+                    </span>
+                  </div>
+
+                  <div className="item-content">
+                    <div className="item-category">
+                      {item.category}
+                    </div>
+
+                    <h3>{item.title}</h3>
+                    <p>{item.description}</p>
+
+                    <div className="item-meta">
+                      <span>
+                        <MapPin size={14} />
+                        {item.location}
+                      </span>
+
+                      <span>
+                        <CalendarDays size={14} />
+                        {item.date
+                          ? new Date(item.date).toLocaleDateString()
+                          : "Date unavailable"}
                       </span>
                     </div>
 
-                    <div className="item-content">
-                      <div className="item-category">
-                        {item.category}
-                      </div>
+                    <div className="item-footer">
+                      <small>
+                        <User size={14} />
+                        {item.user?.name ||
+                          item.reportedBy?.name ||
+                          "Campus student"}
+                      </small>
 
-                      <h3>{item.title}</h3>
-                      <p>{item.description}</p>
-
-                      <div className="item-meta">
-                        <span>
-                          <MapPin size={14} />
-                          {item.location}
-                        </span>
-
-                        <span>
-                          <CalendarDays size={14} />
-                          {item.date
-                            ? new Date(item.date).toLocaleDateString()
-                            : "Date unavailable"}
-                        </span>
-                      </div>
-
-                      <div className="item-footer">
-                        <small>
-                          <User size={14} />
-                          {item.user?.name ||
-                            item.reportedBy?.name ||
-                            "Campus student"}
-                        </small>
-
-                        {item.type?.toLowerCase() === "found" &&
-                          ["open", "active"].includes(
-                            item.status?.toLowerCase()
-                          ) && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setClaim(item);
-                                setProof("");
-                              }}
-                            >
-                              Claim
-                            </button>
-                          )}
-                      </div>
+                      {item.type?.toLowerCase() === "found" &&
+                        ["open", "active"].includes(
+                          item.status?.toLowerCase()
+                        ) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setClaim(item);
+                              setProof("");
+                            }}
+                          >
+                            Claim
+                          </button>
+                        )}
                     </div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
 
         {claim && (
           <div className="modal-backdrop">
