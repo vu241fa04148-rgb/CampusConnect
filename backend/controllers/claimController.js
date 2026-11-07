@@ -1,148 +1,153 @@
-
 const Claim = require("../models/Claim");
 const Item = require("../models/Item");
 const Notification = require("../models/Notification");
 
+const claimPopulate = [
+  { path: "item", populate: { path: "user", select: "name email" } },
+  { path: "claimant", select: "name email" },
+  { path: "reviewedBy", select: "name email" }
+];
+
 exports.createClaim = async (req, res) => {
   try {
     const itemId = req.body.itemId || req.body.item;
-    const { proofDescription } = req.body;
-
-    if (!itemId || !proofDescription || !proofDescription.trim()) {
-      return res.status(400).json({
-        message: "Item and proof description are required"
-      });
+    const { proofDescription, fullName, phone, email } = req.body;
+    if (!itemId || !proofDescription?.trim() || !fullName?.trim() || !phone?.trim() || !email?.trim()) {
+      return res.status(400).json({ message: "Item, proof, full name, phone and email are required." });
     }
-
     const item = await Item.findById(itemId);
-
-    if (!item || item.status !== "active") {
-      return res.status(404).json({
-        message: "Item is unavailable"
-      });
+    if (!item || item.type !== "found" || item.status !== "active") {
+      return res.status(404).json({ message: "This found item is unavailable for claims." });
     }
-
     if (String(item.user) === String(req.user._id)) {
-      return res.status(400).json({
-        message: "You cannot claim your own listing"
-      });
+      return res.status(400).json({ message: "You cannot claim your own listing." });
     }
-
-    const pending = await Claim.findOne({
-      item: itemId,
-      claimant: req.user._id,
-      status: "pending"
+    const existing = await Claim.findOne({
+      item: itemId, claimant: req.user._id,
+      status: { $in: ["pending", "approved", "successful"] }
     });
-
-    if (pending) {
-      return res.status(409).json({
-        message: "You already submitted a pending claim"
-      });
-    }
+    if (existing) return res.status(409).json({ message: "You already have an active or completed claim for this item." });
 
     const claim = await Claim.create({
       item: itemId,
       claimant: req.user._id,
-      proofDescription: proofDescription.trim()
+      proofDescription: proofDescription.trim(),
+      claimantContact: { fullName: fullName.trim(), phone: phone.trim(), email: email.trim().toLowerCase() }
     });
-
-    await Notification.create({
-      user: item.user,
-      message: `A student submitted a claim for "${item.title}".`
-    });
-
-    res.status(201).json({
-      message: "Claim submitted successfully",
-      claim
-    });
-
+    await Notification.create({ user: item.user, message: `A student submitted a claim for "${item.title}".` });
+    res.status(201).json({ message: "Claim submitted successfully.", claim });
   } catch (error) {
-    console.error("Claim submission error:", error);
-
-    res.status(500).json({
-      message: error.message || "Could not submit claim"
-    });
+    console.error("Create claim:", error);
+    res.status(500).json({ message: "Could not submit claim." });
   }
 };
 
 exports.myClaims = async (req, res) => {
   try {
-    const claims = await Claim.find({
-      claimant: req.user._id
-    })
-      .populate("item")
+    const claims = await Claim.find({ claimant: req.user._id })
+      .populate({ path: "item", select: "title type category description location date imageUrl status user", populate: { path: "user", select: "name" } })
       .sort({ createdAt: -1 });
-
     res.json({ claims });
-
   } catch (error) {
-    console.error("My claims error:", error);
+    res.status(500).json({ message: "Could not load your claims." });
+  }
+};
 
-    res.status(500).json({
-      message: "Could not load claims"
-    });
+exports.receivedClaims = async (req, res) => {
+  try {
+    const ownedItems = await Item.find({ user: req.user._id }).distinct("_id");
+    const claims = await Claim.find({ item: { $in: ownedItems } })
+      .select("-claimantContact")
+      .populate({ path: "item", select: "title type category description location date imageUrl status user", populate: { path: "user", select: "name" } })
+      .populate("claimant", "name")
+      .sort({ createdAt: -1 });
+    res.json({ claims });
+  } catch (error) {
+    res.status(500).json({ message: "Could not load claims on your reports." });
   }
 };
 
 exports.allClaims = async (req, res) => {
   try {
-    const claims = await Claim.find()
-      .populate("item")
-      .populate("claimant", "name email")
-      .sort({ createdAt: -1 });
-
+    const claims = await Claim.find().populate(claimPopulate).sort({ createdAt: -1 });
     res.json({ claims });
-
   } catch (error) {
-    console.error("All claims error:", error);
-
-    res.status(500).json({
-      message: "Could not load claims"
-    });
+    res.status(500).json({ message: "Could not load all claims." });
   }
 };
 
 exports.reviewClaim = async (req, res) => {
   try {
     const { status } = req.body;
-
     if (!["approved", "rejected"].includes(status)) {
-      return res.status(400).json({
-        message: "Status must be approved or rejected"
-      });
+      return res.status(400).json({ message: "Status must be approved or rejected." });
     }
-
     const claim = await Claim.findById(req.params.id).populate("item");
-
-    if (!claim) {
-      return res.status(404).json({
-        message: "Claim not found"
-      });
-    }
-
-    claim.status = status;
-    claim.reviewedBy = req.user._id;
-
-    await claim.save();
+    if (!claim) return res.status(404).json({ message: "Claim not found." });
+    if (claim.status !== "pending") return res.status(409).json({ message: "Only pending claims can be reviewed." });
 
     if (status === "approved") {
-      await Item.findByIdAndUpdate(claim.item._id, {
-        status: "claimed"
+      const alreadyApproved = await Claim.findOne({
+        item: claim.item._id, _id: { $ne: claim._id },
+        status: { $in: ["approved", "successful"] }
       });
+      if (alreadyApproved || claim.item.status !== "active") {
+        return res.status(409).json({ message: "Another claim has already been approved for this item." });
+      }
+      const reservedItem = await Item.findOneAndUpdate(
+        { _id: claim.item._id, status: "active" },
+        { $set: { status: "claimed" } },
+        { new: true }
+      );
+      if (!reservedItem) return res.status(409).json({ message: "This item has already been reserved by another approved claim." });
+    }
+    claim.status = status;
+    claim.reviewedBy = req.user._id;
+    await claim.save();
+    await Notification.create({ user: claim.claimant, message: `Your claim for "${claim.item.title}" was ${status}.` });
+    res.json({ message: `Claim ${status}.`, claim });
+  } catch (error) {
+    console.error("Review claim:", error);
+    res.status(500).json({ message: "Could not review claim." });
+  }
+};
+
+exports.confirmReturn = async (req, res) => {
+  try {
+    const claim = await Claim.findById(req.params.id).populate({ path: "item", select: "title user status" });
+    if (!claim) return res.status(404).json({ message: "Claim not found." });
+    if (claim.status !== "approved") return res.status(409).json({ message: "Only approved claims can confirm a return." });
+
+    const isFounder = String(claim.item.user) === String(req.user._id);
+    const isClaimant = String(claim.claimant) === String(req.user._id);
+    if (!isFounder && !isClaimant) return res.status(403).json({ message: "Only the founder and claimant can confirm this handover." });
+
+    if (isFounder) {
+      if (claim.founderReturned) return res.status(409).json({ message: "You have already confirmed the return." });
+      claim.founderReturned = true;
+      claim.founderConfirmedAt = new Date();
+    } else {
+      if (claim.claimantReceived) return res.status(409).json({ message: "You have already confirmed receipt." });
+      claim.claimantReceived = true;
+      claim.claimantConfirmedAt = new Date();
     }
 
-    await Notification.create({
-      user: claim.claimant,
-      message: `Your claim was ${status}.`
+    if (claim.founderReturned && claim.claimantReceived) {
+      claim.status = "successful";
+      claim.returnedAt = new Date();
+      claim.item.status = "returned";
+      await claim.item.save();
+      await Notification.create({ user: claim.claimant, message: `Successful delivery confirmed for "${claim.item.title}".` });
+      await Notification.create({ user: claim.item.user, message: `Successful delivery confirmed for "${claim.item.title}".` });
+    }
+    await claim.save();
+    res.json({
+      message: claim.status === "successful" ? "Both confirmations received. Delivery is successful." : "Your confirmation was saved. Waiting for the other person.",
+      claim: { _id: claim._id, status: claim.status, founderReturned: claim.founderReturned, claimantReceived: claim.claimantReceived, founderConfirmedAt: claim.founderConfirmedAt, claimantConfirmedAt: claim.claimantConfirmedAt, returnedAt: claim.returnedAt }
     });
-
-    res.json({ claim });
-
   } catch (error) {
-    console.error("Review claim error:", error);
-
-    res.status(500).json({
-      message: "Could not review claim"
-    });
+    console.error("Confirm return:", error);
+    if (error.name === "VersionError") return res.status(409).json({ message: "Another confirmation was saved at the same time. Refresh and try again." });
+    res.status(500).json({ message: "Could not save return confirmation." });
   }
 };

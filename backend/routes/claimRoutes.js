@@ -1,24 +1,14 @@
-
 const router = require("express").Router();
-const { protect } = require("../middleware/auth");
+const { protect, adminOnly, studentOnly } = require("../middleware/auth");
 const {
-  createClaim,
-  myClaims,
-  allClaims,
-  reviewClaim
+  createClaim, myClaims, receivedClaims, allClaims, reviewClaim, confirmReturn
 } = require("../controllers/claimController");
 
-const adminOnly = (req, res, next) => {
-  if (req.user.role !== "admin") {
-    return res.status(403).json({ message: "Admin access only" });
-  }
-  next();
-};
-
 router.use(protect);
-
-router.post("/", createClaim);
+router.post("/", studentOnly, createClaim);
 router.get("/mine", myClaims);
+router.get("/received", receivedClaims);
+router.post("/:id/confirm-return", confirmReturn);
 router.get("/all", adminOnly, allClaims);
 router.put("/:id/review", adminOnly, reviewClaim);
 

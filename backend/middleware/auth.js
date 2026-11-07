@@ -18,9 +18,14 @@ async function protect(req, res, next) {
   }
 }
 
+function studentOnly(req, res, next) {
+  if (req.user?.role !== "student") return res.status(403).json({ message: "Student access only" });
+  next();
+}
+
 function adminOnly(req, res, next) {
   if (req.user?.role !== "admin") return res.status(403).json({ message: "Admin access only" });
   next();
 }
 
-module.exports = { protect, adminOnly };
+module.exports = { protect, adminOnly, studentOnly };
